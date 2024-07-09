@@ -1,0 +1,15 @@
+{
+    "C_Cpp.default.cStandard": "c23",
+    "C_Cpp.default.includePath": [
+        "${env:VULKAN_SDK}\\Include**"
+    ],
+    "files.associations": {
+        "array": "c",
+        "span": "c",
+        "vector": "c",
+        "xstring": "c",
+        "xutility": "c",
+        "format": "c",
+        "xiosbase": "c"
+    },
+}

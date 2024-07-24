@@ -4,7 +4,7 @@
 
 ## Build setup
 
-If you use vscode, make sure the `.vscode/c_cpp_properties.json` `CMakeLists.txt` files are configured correctly.
+If you use vscode, make sure the files `.vscode/c_cpp_properties.json` `CMakeLists.txt` are configured correctly.
 
 ### Requirements for Linux
 

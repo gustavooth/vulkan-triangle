@@ -14,6 +14,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src/)
 
 if(WIN32)
     set(CMAKE_C_COMPILER "C:/Program Files/LLVM/bin/clang.exe")
+    add_definitions(-DPLATFORM_WIN32)
     include_directories($ENV{VULKAN_SDK}/Include)
 elseif(LINUX)
     set(CMAKE_C_COMPILER clang)

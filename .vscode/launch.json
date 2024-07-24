@@ -11,6 +11,7 @@
             "cwd": "${workspaceFolder}/app/",
             "environment": [],
             "console":"newExternalWindow",
+            "preLaunchTask": "Build All"
         },
         {
             "name": "(Linux) Launch",

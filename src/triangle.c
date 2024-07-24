@@ -12,9 +12,11 @@
 #ifdef PLATFORM_WAYLAND
     #define VK_USE_PLATFORM_WAYLAND_KHR
     #include "platform/linux/platform_wayland.h"
-#elif Win32
+#elif PLATFORM_WIN32
     #define VK_USE_PLATFORM_WIN32_KHR
+    #include "platform/win32/platform_win32.h"
 #endif
+
 #include <vulkan/vulkan.h>
 
 typedef struct SwapchainSupportDetails {
@@ -136,7 +138,6 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     void* pUserData) {
 
     switch (messageSeverity) {
-        default:
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
             REXERROR(pCallbackData->pMessage);
             break;
@@ -146,8 +147,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
             REXINFO(pCallbackData->pMessage);
             break;
-        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-            REXTRACE(pCallbackData->pMessage);
+        default:
             break;
     }
 
@@ -181,6 +181,7 @@ b8 setup_debug_messenger() {
 }
 
 b8 create_surface() {
+#ifdef PLATFORM_WAYLAND
     REXDEBUG("Creating wayland surface...");
     WaylandState* state = (WaylandState*)window.internal_state;
     VkWaylandSurfaceCreateInfoKHR surface_info = {VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR};
@@ -192,7 +193,18 @@ b8 create_surface() {
         REXFATAL("failed to create wayland surface!");
         return false;
     }
-    
+#elif PLATFORM_WIN32
+    REXDEBUG("Creating win32 surface...");
+    Win32State* state = (Win32State*)window.internal_state;
+    VkWin32SurfaceCreateInfoKHR surface_info = {VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
+    surface_info.hwnd = state->hwnd;
+    surface_info.hinstance = state->h_instance;
+
+    if (vkCreateWin32SurfaceKHR(vkstate.instance, &surface_info, 0, &vkstate.surface) != VK_SUCCESS) {
+        REXFATAL("failed to create win32 surface!");
+        return false;
+    }
+#endif
 
     return true;
 }

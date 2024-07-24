@@ -16,6 +16,12 @@
         "platform_wayland.h": "c",
         "xf86drm.h": "c",
         "xf86drmmode.h": "c",
-        "map": "c"
-    }
+        "map": "c",
+        "iosfwd": "c",
+        "xlocbuf": "c"
+    },
+    "C_Cpp.default.includePath": [
+        "${VULKAN_SDK}/Include**",
+        "src/**"
+    ]
 }

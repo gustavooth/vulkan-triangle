@@ -6,7 +6,9 @@
                 "/usr/include/*",
                 "src/*"
             ],
-            "defines": ["PLATFORM_WAYLAND"],
+            "defines": [
+                "PLATFORM_WAYLAND"
+            ],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c23",
             "intelliSenseMode": "linux-clang-x86"
@@ -14,10 +16,15 @@
         {
             "name": "Windows",
             "includePath": [
-                "${env:VULKAN_SDK}\\Include*",
-                "src/*"
+                "${VULKAN_SDK}/Include**",
+                "src/**"
             ],
-            "cStandard": "c23"
+            "cStandard": "c23",
+            "compilerPath": "C:/Program Files/LLVM/bin/clang.exe",
+            "defines": [
+                "PLATFORM_WIN32"
+            ],
+            "intelliSenseMode": "windows-clang-x64"
         }
     ],
     "version": 4

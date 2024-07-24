@@ -1,11 +1,23 @@
-#include <stdio.h>
 #include "defines.h"
-#include "window.h"
+#include "core/logger.h"
+#include "core/events.h"
+#include "containers/rexarray.h"
 
-#define VK_USE_PLATFORM_WIN32_KHR
+#include "platform/platform.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef PLATFORM_WAYLAND
+    #define VK_USE_PLATFORM_WAYLAND_KHR
+    #include "platform/linux/platform_wayland.h"
+#elif Win32
+    #define VK_USE_PLATFORM_WIN32_KHR
+#endif
 #include <vulkan/vulkan.h>
 
-typedef struct swapchain_support_details {
+typedef struct SwapchainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
 
     u32 format_count;
@@ -13,7 +25,12 @@ typedef struct swapchain_support_details {
 
     u32 present_mode_count;
     VkPresentModeKHR* present_modes;
-} swapchain_support_details;
+} SwapchainSupportDetails;
+
+typedef struct QueueIndex {
+    u32 family_index;
+    u32 index;
+} QueueIndex;
 
 struct vkstate {
     VkInstance instance;
@@ -21,17 +38,21 @@ struct vkstate {
 
     VkPhysicalDevice physical_device;
     VkDevice device;
-    u32 graphics_queue_index;
-    u32 present_queue_index;
-    u32 transfer_queue_index;
-    u32 compute_queue_index;
+    QueueIndex graphics_queue_index;
+    QueueIndex present_queue_index;
+    QueueIndex transfer_queue_index;
+    QueueIndex compute_queue_index;
+    u32* queue_count; // rexarray
+    u32* queue_family_indexes; //rexarray
     VkQueue graphics_queue;
     VkQueue present_queue;
+    VkQueue transfer_queue;
+    VkQueue compute_queue;
 
     VkSurfaceKHR surface;
 
     VkSwapchainKHR swapchain;
-    swapchain_support_details swapchain_support;
+    SwapchainSupportDetails swapchain_support;
     u32 framebuffer_width;
     u32 framebuffer_height;
     VkSurfaceFormatKHR image_format;
@@ -59,9 +80,10 @@ struct vkstate {
 
 b8 running = true;
 static struct vkstate vkstate;
+static Window window;
 
 b8 create_instance() {
-    printf("Creating instance...\n");
+    REXDEBUG("Creating instance...");
     VkApplicationInfo app_info = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app_info.pApplicationName = "Triangle";
     app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -76,10 +98,14 @@ b8 create_instance() {
     const char** instance_extensions = malloc(sizeof(const char*) * instance_ext_count);
     const char* surface_ext = VK_KHR_SURFACE_EXTENSION_NAME;
     const char* debug_ext = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-    const char* win32_ext = "VK_KHR_win32_surface";
+#ifdef PLATFORM_WAYLAND
+    const char* platform_ext = "VK_KHR_wayland_surface";
+#elif PLATFORM_WIN32
+    const char* platform_ext = "VK_KHR_win32_surface";
+#endif
     instance_extensions[0] = surface_ext;
     instance_extensions[1] = debug_ext;
-    instance_extensions[2] = win32_ext;
+    instance_extensions[2] = platform_ext;
 
     instance_info.enabledExtensionCount = instance_ext_count;
     instance_info.ppEnabledExtensionNames = instance_extensions;
@@ -94,7 +120,7 @@ b8 create_instance() {
 
     if (vkCreateInstance(&instance_info, 0, &vkstate.instance))
     {
-        printf("failed to create instance!");
+        REXFATAL("failed to create instance!");
         return false;
     }
 
@@ -109,13 +135,27 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData) {
 
-    printf("%s\n", pCallbackData->pMessage);
+    switch (messageSeverity) {
+        default:
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+            REXERROR(pCallbackData->pMessage);
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+            REXWARN(pCallbackData->pMessage);
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            REXINFO(pCallbackData->pMessage);
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+            REXTRACE(pCallbackData->pMessage);
+            break;
+    }
 
     return VK_FALSE;
 }
 
 b8 setup_debug_messenger() {
-    printf("Creating debug messenger...\n");
+    REXDEBUG("Creating debug messenger...");
     VkDebugUtilsMessengerCreateInfoEXT debug_info = {VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
     debug_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
     debug_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
@@ -126,14 +166,14 @@ b8 setup_debug_messenger() {
 
     if (func == 0)
     {
-        printf("failed to get debug messenger function!");
+        REXFATAL("failed to get debug messenger function!");
         return false;
     }
     
     
     if (func(vkstate.instance, &debug_info, 0, &vkstate.debug_messenger) != VK_SUCCESS)
     {
-        printf("failed to create debug messenger!");
+        REXFATAL("failed to create debug messenger!");
         return false;
     }
 
@@ -141,20 +181,23 @@ b8 setup_debug_messenger() {
 }
 
 b8 create_surface() {
-    printf("Creating surface...\n");
-    VkWin32SurfaceCreateInfoKHR surface_info = {VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
-    surface_info.hwnd = hwnd;
-    surface_info.hinstance = h_instance;
+    REXDEBUG("Creating wayland surface...");
+    WaylandState* state = (WaylandState*)window.internal_state;
+    VkWaylandSurfaceCreateInfoKHR surface_info = {VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR};
+    surface_info.display = state->display;
+    surface_info.surface = state->surface;
 
-    if (vkCreateWin32SurfaceKHR(vkstate.instance, &surface_info, 0, &vkstate.surface) != VK_SUCCESS) {
-        printf("failed to create window surface!\n");
+    if (vkCreateWaylandSurfaceKHR(vkstate.instance, &surface_info, 0, &vkstate.surface) != VK_SUCCESS)
+    {
+        REXFATAL("failed to create wayland surface!");
         return false;
     }
+    
 
     return true;
 }
 
-b8 query_swapchain_support(VkPhysicalDevice device, swapchain_support_details* out_swapchain_support) {
+b8 query_swapchain_support(VkPhysicalDevice device, SwapchainSupportDetails* out_swapchain_support) {
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, vkstate.surface, &out_swapchain_support->capabilities);
 
     vkGetPhysicalDeviceSurfaceFormatsKHR(device, vkstate.surface, &out_swapchain_support->format_count, 0);
@@ -170,19 +213,19 @@ b8 query_swapchain_support(VkPhysicalDevice device, swapchain_support_details* o
     return true;
 }
 
-void destroy_swapchain_support(swapchain_support_details* swapchain_support) {
+void destroy_swapchain_support(SwapchainSupportDetails* swapchain_support) {
     if (swapchain_support->formats) free(swapchain_support->formats);
     if (swapchain_support->present_modes) free(swapchain_support->present_modes);
-    memset(swapchain_support, 0, sizeof(swapchain_support_details));
+    memset(swapchain_support, 0, sizeof(SwapchainSupportDetails));
 }
 
 b8 pick_physical_device() {
-    printf("Choosing physical device...\n");
+    REXDEBUG("Choosing physical device...");
     u32 device_count = 0;
     vkEnumeratePhysicalDevices(vkstate.instance, &device_count, 0);
 
     if (device_count == 0) {
-        printf("failed to find GPUs with Vulkan support!");
+        REXFATAL("failed to find GPUs with Vulkan support!");
         return false;
     }
 
@@ -204,7 +247,7 @@ b8 pick_physical_device() {
 
         vkstate.physical_device = physical_devices[i];
         found = true;
-        printf("Selected device: %s\n", properties.deviceName);
+        REXINFO("Selected device: %s", properties.deviceName);
         break;
     }
 
@@ -215,34 +258,82 @@ b8 pick_physical_device() {
     VkQueueFamilyProperties* queue_families = malloc(sizeof(VkQueueFamilyProperties) * queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(vkstate.physical_device, &queue_family_count, queue_families);
 
-    vkstate.graphics_queue_index = -1;
-    vkstate.compute_queue_index = -1;
-    vkstate.transfer_queue_index = -1;
-    vkstate.present_queue_index = -1;
+    vkstate.graphics_queue_index.family_index = -1;
+    vkstate.compute_queue_index.family_index = -1;
+    vkstate.transfer_queue_index.family_index = -1;
+    vkstate.present_queue_index.family_index = -1;
+
+    vkstate.queue_count = REXARRAY(u32);
+    vkstate.queue_family_indexes = REXARRAY(u32);
 
     for (u32 i = 0; i < queue_family_count; ++i) {
-        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            vkstate.graphics_queue_index = i;
+        if (vkstate.graphics_queue_index.family_index != -1 && vkstate.present_queue_index.family_index != -1 && vkstate.transfer_queue_index.family_index != -1 && vkstate.compute_queue_index.family_index != -1)
+        {
+            break;
+        }
+        
+        u32 index_count = 0;
+        if (vkstate.graphics_queue_index.family_index == -1 && queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            vkstate.graphics_queue_index.family_index = i;
+            vkstate.graphics_queue_index.index = index_count;
+            index_count++;
+            if (queue_families[i].queueCount == index_count) {
+                rexarray_push(vkstate.queue_count, &index_count);
+                rexarray_push(vkstate.queue_family_indexes, &i);
+                continue;
+            };
         }
 
-        if (queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
-            vkstate.compute_queue_index = i;
+        if (vkstate.compute_queue_index.family_index == -1 && queue_families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+            vkstate.compute_queue_index.family_index = i;
+            vkstate.compute_queue_index.index = index_count;
+            index_count++;
+            if (queue_families[i].queueCount == index_count) {
+                rexarray_push(vkstate.queue_count, &index_count);
+                rexarray_push(vkstate.queue_family_indexes, &i);
+                continue;
+            };
         }
 
-        if (queue_families[i].queueFlags & VK_QUEUE_TRANSFER_BIT) {
-            vkstate.transfer_queue_index = i;
+        if (vkstate.transfer_queue_index.family_index == -1 && queue_families[i].queueFlags & VK_QUEUE_TRANSFER_BIT) {
+            vkstate.transfer_queue_index.family_index = i;
+            vkstate.transfer_queue_index.index = index_count;
+            index_count++;
+            if (queue_families[i].queueCount == index_count) {
+                rexarray_push(vkstate.queue_count, &index_count);
+                rexarray_push(vkstate.queue_family_indexes, &i);
+                continue;
+            };
         }
 
-        VkBool32 supports_present = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(vkstate.physical_device, i, vkstate.surface, &supports_present);
-        if (supports_present) {
-            vkstate.present_queue_index = i;
+        if (vkstate.present_queue_index.family_index == -1)
+        {
+            VkBool32 supports_present = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(vkstate.physical_device, i, vkstate.surface, &supports_present);
+            if (supports_present) {
+                vkstate.present_queue_index.family_index = i;
+                vkstate.present_queue_index.index = index_count;
+                index_count++;
+                if (queue_families[i].queueCount == index_count) {
+                    rexarray_push(vkstate.queue_count, &index_count);
+                    rexarray_push(vkstate.queue_family_indexes, &i);
+                    continue;
+                };
+            }
         }
+
+        rexarray_push(vkstate.queue_count, &index_count);
+        rexarray_push(vkstate.queue_family_indexes, &i);
     }
 
-    if (vkstate.graphics_queue_index == -1 || vkstate.present_queue_index == -1 || vkstate.transfer_queue_index == -1 || vkstate.compute_queue_index == -1)
+    REXDEBUG("Queue family index : Queue index ________");
+    REXDEBUG(" Graphics | Compute | Transfer | Present |");
+    REXDEBUG("   %i:%i    |   %i:%i   |   %i:%i    |   %i:%i   |", vkstate.graphics_queue_index.family_index, vkstate.graphics_queue_index.index, vkstate.compute_queue_index.family_index, vkstate.compute_queue_index.index, vkstate.transfer_queue_index.family_index, vkstate.transfer_queue_index.index, vkstate.present_queue_index.family_index, vkstate.present_queue_index.index);
+    REXDEBUG("_________________________________________");
+
+    if (vkstate.graphics_queue_index.family_index == -1 || vkstate.present_queue_index.family_index == -1 || vkstate.transfer_queue_index.family_index == -1 || vkstate.compute_queue_index.family_index == -1)
     {
-        printf("Queue family indexes not found!");
+        REXFATAL("Queue family indexes not found!");
         return false;
     }
 
@@ -252,22 +343,19 @@ b8 pick_physical_device() {
 }
 
 b8 create_logical_device() {
-    printf("Creating logical device...\n");
+    REXDEBUG("Creating logical device...");
 
-    u32 queue_count = 3;
+    u32 queue_count = rexarray_len(vkstate.queue_count);
     VkDeviceQueueCreateInfo* queue_info = malloc(sizeof(VkDeviceQueueCreateInfo) * queue_count);
     memset(queue_info, 0, sizeof(VkDeviceQueueCreateInfo) * queue_count);
-    f32 queue_priority = 1.0f;
+    f32 queue_priority[] = {1.f, .9f, .8f, .7f, .6f};
     for (u32 i = 0; i < queue_count; i++)
     {
         queue_info[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queue_info[i].queueCount = 1;
-        queue_info[i].pQueuePriorities = &queue_priority; 
+        queue_info[i].queueFamilyIndex = vkstate.queue_family_indexes[i];
+        queue_info[i].queueCount = vkstate.queue_count[i];
+        queue_info[i].pQueuePriorities = &queue_priority[i];
     }
-    
-    queue_info[0].queueFamilyIndex = vkstate.graphics_queue_index;
-    queue_info[1].queueFamilyIndex = vkstate.present_queue_index;
-    queue_info[2].queueFamilyIndex = vkstate.transfer_queue_index;
 
     VkPhysicalDeviceFeatures device_features = {0};
     device_features.samplerAnisotropy = VK_TRUE;
@@ -283,18 +371,20 @@ b8 create_logical_device() {
 
     if (vkCreateDevice(vkstate.physical_device, &device_info, 0, &vkstate.device) != VK_SUCCESS)
     {
-        printf("failed to create logical device!");
+        REXFATAL("failed to create logical device!");
         return false;
     }
 
-    vkGetDeviceQueue(vkstate.device, vkstate.graphics_queue_index, 0, &vkstate.graphics_queue);
-    vkGetDeviceQueue(vkstate.device, vkstate.present_queue_index, 0, &vkstate.present_queue);
+    vkGetDeviceQueue(vkstate.device, vkstate.graphics_queue_index.family_index, vkstate.graphics_queue_index.index, &vkstate.graphics_queue);
+    vkGetDeviceQueue(vkstate.device, vkstate.present_queue_index.family_index, vkstate.graphics_queue_index.index, &vkstate.present_queue);
+    vkGetDeviceQueue(vkstate.device, vkstate.compute_queue_index.family_index, vkstate.graphics_queue_index.index, &vkstate.compute_queue);
+    vkGetDeviceQueue(vkstate.device, vkstate.transfer_queue_index.family_index, vkstate.graphics_queue_index.index, &vkstate.transfer_queue);
 
     return true;
 }
 
 b8 create_swapchain() {
-    printf("Creating swpachain...\n");
+    REXDEBUG("Creating swpachain...");
 
     u32 format_index = 0;
     for (u32 i = 0; i < vkstate.swapchain_support.format_count; i++)
@@ -340,10 +430,10 @@ b8 create_swapchain() {
     else swapchain_info.presentMode = vkstate.swapchain_support.present_modes[present_mode_index];
     swapchain_info.clipped = VK_TRUE;
 
-    if(vkstate.graphics_queue_index != vkstate.present_queue_index) {
+    if(vkstate.graphics_queue_index.family_index != vkstate.present_queue_index.family_index) {
         u32 queueFamilyIndices[] = {
-            vkstate.graphics_queue_index,
-            vkstate.present_queue_index,
+            vkstate.graphics_queue_index.family_index,
+            vkstate.present_queue_index.family_index,
         };
         swapchain_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT,
         swapchain_info.queueFamilyIndexCount = 2,
@@ -360,13 +450,13 @@ b8 create_swapchain() {
 
     vkstate.image_format = vkstate.swapchain_support.formats[format_index];
 
-    printf("Retrieving the swapchain images...\n");
+    REXDEBUG("Retrieving the swapchain images...");
 
     vkGetSwapchainImagesKHR(vkstate.device, vkstate.swapchain, &vkstate.image_count, 0);
     vkstate.swapchain_images = malloc(sizeof(VkImage) * vkstate.image_count);
     vkGetSwapchainImagesKHR(vkstate.device, vkstate.swapchain, &vkstate.image_count, vkstate.swapchain_images);
 
-    printf("Creating image viwes...\n");
+    REXDEBUG("Creating image viwes...");
 
     vkstate.swapchain_image_views = malloc(sizeof(VkImageView) * vkstate.image_count);
 
@@ -387,7 +477,7 @@ b8 create_swapchain() {
         image_view_info.subresourceRange.layerCount = 1;
 
         if(vkCreateImageView(vkstate.device, &image_view_info, 0, &vkstate.swapchain_image_views[i]) != VK_SUCCESS) {
-            printf("failed to create image views!\n");
+            REXFATAL("failed to create image views!");
             return false;
         }
     }
@@ -396,7 +486,7 @@ b8 create_swapchain() {
 }
 
 b8 create_render_pass() {
-    printf("creating renderpass...\n");
+    REXDEBUG("Creating renderpass...");
 
     VkAttachmentDescription color_attachment = {0};
     color_attachment.format = vkstate.image_format.format;
@@ -434,7 +524,7 @@ b8 create_render_pass() {
     render_pass_info.pDependencies = &dependency;
 
     if (vkCreateRenderPass(vkstate.device, &render_pass_info, 0, &vkstate.render_pass) != VK_SUCCESS) {
-        printf("failed to create renderpass!\n");
+        REXFATAL("failed to create renderpass!");
         return false;
     }
 
@@ -442,10 +532,9 @@ b8 create_render_pass() {
 }
 
 b8 read_file(const char* file_name, u32* out_file_size, u8* out_buffer) {
-    FILE* file = 0;
-    fopen_s(&file, file_name, "rb");
+    FILE* file = fopen(file_name, "rb");
     if (file == 0) {
-        printf("failed to open file: %s!\n", file_name);
+        REXFATAL("failed to open file: [%s]", file_name);
         return false;
     }
 
@@ -456,7 +545,7 @@ b8 read_file(const char* file_name, u32* out_file_size, u8* out_buffer) {
     if (out_buffer == 0) return true;
 
     if (fread(out_buffer, 1, *out_file_size, file) != *out_file_size) {
-        printf("failed to read file!\n");
+        REXFATAL("failed to read file!");
         fclose(file);
         return false;
     }
@@ -475,7 +564,7 @@ b8 create_shader_module(u8* buffer, u32 buffer_size, VkShaderModule* out_shader)
 }
 
 b8 create_graphics_pipeline() {
-    printf("Creating graphics pipeline...\n");
+    REXDEBUG("Creating graphics pipeline...");
 
     u32 vert_shader_buffer_size;
     if (!read_file("shader/triangle.vert.spv", &vert_shader_buffer_size, 0)) return false;
@@ -490,11 +579,11 @@ b8 create_graphics_pipeline() {
     VkShaderModule vert_shader;
     VkShaderModule frag_shader;
     if(!create_shader_module(vert_shader_buffer, vert_shader_buffer_size, &vert_shader)) {
-        printf("failed to create vertex shader module!\n");
+        REXFATAL("failed to create vertex shader module!");
         return false;
     }
     if(!create_shader_module(frag_shader_buffer, frag_shader_buffer_size, &frag_shader)) {
-        printf("failed to create fragment shader module!\n");
+        REXFATAL("failed to create fragment shader module!");
         return false;
     }
 
@@ -573,7 +662,7 @@ b8 create_graphics_pipeline() {
     VkPipelineLayoutCreateInfo pipeline_layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
 
     if (vkCreatePipelineLayout(vkstate.device, &pipeline_layout_info, 0, &vkstate.pipeline_layout) != VK_SUCCESS) {
-        printf("failed to create pipeline layout!\n");
+        REXFATAL("failed to create pipeline layout!");
         return false;
     }
 
@@ -593,7 +682,7 @@ b8 create_graphics_pipeline() {
     pipeline_info.subpass = 0;
 
     if(vkCreateGraphicsPipelines(vkstate.device, 0, 1, &pipeline_info, 0, &vkstate.graphics_pipeline) != VK_SUCCESS) {
-        printf("failed to create graphics pipeline!\n");
+        REXFATAL("failed to create graphics pipeline!");
         return false;
     }
 
@@ -606,7 +695,7 @@ b8 create_graphics_pipeline() {
 }
 
 b8 create_framebuffers() {
-    printf("Creating framebuffers...\n");
+    REXDEBUG("Creating framebuffers...");
 
     vkstate.framebuffers = malloc(sizeof(VkFramebuffer) * vkstate.image_count);
 
@@ -623,7 +712,7 @@ b8 create_framebuffers() {
         framebuffer_info.layers = 1;
 
         if(vkCreateFramebuffer(vkstate.device, &framebuffer_info, 0, &vkstate.framebuffers[i]) != VK_SUCCESS) {
-            printf("failed to create framebuffer[%i]!\n", i);
+            REXFATAL("failed to create framebuffer[%i]!", i);
             return false;
         }
     }
@@ -632,14 +721,14 @@ b8 create_framebuffers() {
 }
 
 b8 create_command_pool() {
-    printf("Creating commando pool...\n");
+    REXDEBUG("Creating commando pool...");
 
     VkCommandPoolCreateInfo pool_info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    pool_info.queueFamilyIndex = vkstate.graphics_queue_index;
+    pool_info.queueFamilyIndex = vkstate.graphics_queue_index.family_index;
 
     if(vkCreateCommandPool(vkstate.device, &pool_info, 0, &vkstate.commando_pool) != VK_SUCCESS) {
-        printf("failed to create commando pool!\n");
+        REXFATAL("failed to create commando pool!");
         return false;
     }
 
@@ -647,7 +736,7 @@ b8 create_command_pool() {
 }
 
 b8 allocate_command_buffers() {
-    printf("Allocating command buffers..\n");
+    REXDEBUG("Allocating command buffers..");
 
     VkCommandBufferAllocateInfo command_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     command_info.commandPool = vkstate.commando_pool;
@@ -655,7 +744,7 @@ b8 allocate_command_buffers() {
     command_info.commandBufferCount = 1;
 
     if(vkAllocateCommandBuffers(vkstate.device, &command_info, &vkstate.command_buffer) != VK_SUCCESS) {
-        printf("failed to allocate command buffers!\n");
+        REXFATAL("failed to allocate command buffers!");
         return false;
     }
 
@@ -666,7 +755,7 @@ b8 record_command_buffer() {
     VkCommandBufferBeginInfo command_begin_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
 
     if(vkBeginCommandBuffer(vkstate.command_buffer, &command_begin_info) != VK_SUCCESS) {
-        printf("failed to start command buffer!\n");
+        REXFATAL("failed to start command buffer!");
         return false;
     }
 
@@ -704,7 +793,7 @@ b8 record_command_buffer() {
     vkCmdEndRenderPass(vkstate.command_buffer);
 
     if(vkEndCommandBuffer(vkstate.command_buffer) != VK_SUCCESS) {
-        printf("failed to finish command buffer!\n");
+        REXFATAL("failed to finish command buffer!");
         return false;
     }
 
@@ -721,7 +810,7 @@ b8 create_sync_objects() {
         vkCreateSemaphore(vkstate.device, &semaphore_info, 0, &vkstate.render_finished_semaphore) != VK_SUCCESS ||
         vkCreateFence(vkstate.device, &fence_info, 0, &vkstate.in_flight_fence) != VK_SUCCESS) {
 
-        printf("failed to create sync objects!\n");
+        REXFATAL("failed to create sync objects!");
         return false;
     }
 
@@ -729,6 +818,8 @@ b8 create_sync_objects() {
 }
 
 b8 init_vulkan() {
+    REXDEBUG("Starting vulkan renderer...");
+
     if(!create_instance()) return false;
     if(!setup_debug_messenger()) return false;
     if(!create_surface()) return false;
@@ -742,7 +833,7 @@ b8 init_vulkan() {
     if(!allocate_command_buffers()) return false;
     if(!create_sync_objects()) return false;
 
-    printf("\nVulkan renderer started successfully\n");
+    REXINFO("Vulkan renderer started successfully");
     return true;
 }
 
@@ -774,7 +865,7 @@ void draw_frame() {
     submit_info.pSignalSemaphores = signal_semaphores;
 
     if(vkQueueSubmit(vkstate.graphics_queue, 1, &submit_info, vkstate.in_flight_fence) != VK_SUCCESS) {
-        printf("failed to send queue!\n");
+        REXFATAL("failed to send queue!");
         return;
     }
 
@@ -789,7 +880,7 @@ void draw_frame() {
 }
 
 void loop() {
-    window_pump_messages();
+    platform_process_window_messages(&window);
     draw_frame();
 }
 
@@ -823,24 +914,31 @@ void cleanup () {
 
     vkDestroyInstance(vkstate.instance, 0);
 
-    window_destroy();
+    platform_destroy_window(&window);
 }
 
-void window_close_event() {
+b8 close_event(u16 code, void* sender, EventContext data) {
+    REXINFO("close event!");
     running = false;
+    return false;
 }
 
 int main() {
-    window_create("Triangle", 200, 100, 1280, 720);
-    window_show();
-    window_close = window_close_event;
+    logger_initialize();
+    event_initialize();
+
+    event_register(EVENT_CODE_APPLICATION_QUIT, 0, close_event);
+
+    platform_create_window("Triangle", 200, 200, 1280, 720, &window);
+
+    platform_show_window(&window);
 
     vkstate.framebuffer_width = 1280;
     vkstate.framebuffer_height = 720;
 
     if (!init_vulkan())
     {
-        printf("failed to initilize vulkan renderer!\n");
+        REXFATAL("failed to initilize vulkan renderer!");
         running = false;
     }
 
@@ -848,11 +946,8 @@ int main() {
     {
         loop();
     }
-    
-    cleanup();
 
-    printf("\n"); 
-    getchar();
+    cleanup();
 
     return 0;
 }

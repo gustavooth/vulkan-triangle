@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/usr/include/*",
+                "src/*"
+            ],
+            "defines": ["PLATFORM_WAYLAND"],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c23",
+            "intelliSenseMode": "linux-clang-x86"
+        },
+        {
+            "name": "Windows",
+            "includePath": [
+                "${env:VULKAN_SDK}\\Include*",
+                "src/*"
+            ],
+            "cStandard": "c23"
+        }
+    ],
+    "version": 4
+}

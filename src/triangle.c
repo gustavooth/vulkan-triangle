@@ -930,7 +930,6 @@ void cleanup () {
 }
 
 b8 close_event(u16 code, void* sender, EventContext data) {
-    REXINFO("close event!");
     running = false;
     return false;
 }
@@ -955,9 +954,7 @@ int main() {
     }
 
     while (running)
-    {
         loop();
-    }
 
     cleanup();
 

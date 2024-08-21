@@ -12,8 +12,6 @@
 #include <string.h>
 #include "xdg-shell-client-protocol.h"
 
-#define DRM_FORMAT_ARGB8888 0x34325241
-
 static void global_registry_handler(void* data, struct wl_registry *registry, u32 id,
 	const char *interface, u32 version);
 static void global_registry_remover(void* data, struct wl_registry *registry, u32 id);
@@ -44,11 +42,6 @@ static const struct xdg_toplevel_listener xdg_toplevel_listener = {
     .wm_capabilities = wm_capabilities,
 };
 
-void frame_new(void *data, struct wl_callback *wl_callback, u32 callback_data);
-struct wl_callback_listener callback_listener = {
-	.done = frame_new
-};
-
 b8 platform_create_window(const char* window_name, u32 pos_x, u32 pos_y, u32 width, u32 height, Window* window) {
     WaylandState* state = malloc(sizeof(WaylandState));
     memset(state, 0, sizeof(WaylandState));
@@ -56,7 +49,7 @@ b8 platform_create_window(const char* window_name, u32 pos_x, u32 pos_y, u32 wid
 
     state->display = wl_display_connect(NULL);
     if (!state->display) {
-        fprintf(stderr, "Failed to connect to Wayland display\n");
+        REXERROR("Failed to connnect to Wayland display");
         return false;
     }
 
@@ -67,24 +60,19 @@ b8 platform_create_window(const char* window_name, u32 pos_x, u32 pos_y, u32 wid
     wl_display_roundtrip(state->display);
 
     state->surface = wl_compositor_create_surface(state->compositor);
-    
-    struct wl_callback* callback = wl_surface_frame(state->surface);
-	wl_callback_add_listener(callback, &callback_listener, state);
 
     state->xdg_surface = xdg_wm_base_get_xdg_surface(state->xdg_wm_base, state->surface);
     state->xdg_toplevel = xdg_surface_get_toplevel(state->xdg_surface);
 
-    xdg_toplevel_set_title(state->xdg_toplevel, window_name);
-    xdg_toplevel_set_app_id(state->xdg_toplevel, window_name);
-
     xdg_surface_add_listener(state->xdg_surface, &xdg_surface_listener, state);
     xdg_toplevel_add_listener(state->xdg_toplevel, &xdg_toplevel_listener, state);
+
+    xdg_toplevel_set_title(state->xdg_toplevel, window_name);
 
     state->width = width;
     state->height = height;
 
     wl_surface_commit(state->surface);
-    wl_display_roundtrip(state->display);
 
     REXINFO("Wayland state initialized!");
 
@@ -155,8 +143,6 @@ void xgd_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel) {
 
 void configure_bounds(void *data, struct xdg_toplevel *xdg_toplevel, i32 width, i32 height) {}
 void wm_capabilities(void *data, struct xdg_toplevel *xdg_toplevel, struct wl_array *capabilities) {}
-
-void frame_new(void *data, struct wl_callback *wl_callback, u32 callback_data) {}
 
 void platform_console_write(const char* message, u8 colour) {
     // FATAL,ERROR,WARN,INFO,DEBUG,TRACE

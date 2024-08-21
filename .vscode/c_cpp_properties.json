@@ -11,20 +11,7 @@
             ],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c23",
-            "intelliSenseMode": "linux-clang-x86"
-        },
-        {
-            "name": "Windows",
-            "includePath": [
-                "${VULKAN_SDK}/Include**",
-                "src/**"
-            ],
-            "cStandard": "c23",
-            "compilerPath": "C:/Program Files/LLVM/bin/clang.exe",
-            "defines": [
-                "PLATFORM_WIN32"
-            ],
-            "intelliSenseMode": "windows-clang-x64"
+            "intelliSenseMode": "linux-clang-x64"
         }
     ],
     "version": 4

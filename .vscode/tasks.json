@@ -2,12 +2,12 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "Build All",
+            "label": "Build",
             "windows": {
-                "command": "${workspaceFolder}/build.bat",
+                "command": "make -f 'Makefile.windows.mak'"
             },
             "linux": {
-                "command": "${workspaceFolder}/build.sh"
+                "command": "make -f 'Makefile.linux.mak'"
             },
             "options": {
                 "cwd": "${workspaceFolder}"

@@ -11,25 +11,23 @@ If you use vscode, make sure the files `.vscode/c_cpp_properties.json` `CMakeLis
 Install these via package manager:
 
  - `git`
- - `cmake`
- - `ninja`
- - `gdb`
+ - `make`
+ - `gdb` // for debugging
  - `vulkan-devel`
 
  ### Requirements for Windows
 
  - Git: https://git-scm.com/download/windows
- - Cmake: https://cmake.org/download/
- - Ninja: https://github.com/ninja-build/ninja/releases
  - Clang: https://releases.llvm.org
+ - Make: https://gnuwin32.sourceforge.net/packages/make.htm
  - msvc: install Visual Studio
  - Windows SDK: install Visual Studio:
  - Vulkan SDK: https://vulkan.lunarg.com/sdk/home
 
 ## Build
 
- - Run  `Ctrl + Shift + B` shortcut in vscode.
+ - Run command  `make -f Makefile.linux.mak`.
 
 ## Run
 
- - Run `F5` shortcut in vscode.
+ - Run command  `make -f Makefile.linux.mak run`.

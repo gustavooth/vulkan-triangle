@@ -5,7 +5,7 @@
             "name": "(Windows) Launch",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/triangle.exe",
+            "program": "${workspaceFolder}/app/triangle.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/app/",
@@ -17,7 +17,7 @@
             "name": "(Linux) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bin/triangle",
+            "program": "${workspaceFolder}/app/triangle",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/app",
@@ -31,7 +31,7 @@
                     "ignoreFailures": true
                 }
             ],
-            "preLaunchTask": "Build All"
+            "preLaunchTask": "Build"
         }
     ]
 }
